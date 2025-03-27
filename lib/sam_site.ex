@@ -11,20 +11,23 @@ defmodule SamSite do
             type: type(),
             pos_lat: position(),
             pos_lng: position(),
-            launches: integer()
+            launches: integer(),
+            pubsub: {atom(), atom()}
           }
 
     @enforce_keys [
       :name,
       :type,
       :pos_lat,
-      :pos_lng
+      :pos_lng,
+      :pubsub
     ]
     defstruct [
       :name,
       :type,
       :pos_lat,
       :pos_lng,
+      :pubsub,
       launches: 0,
       status: :offline
     ]
@@ -32,6 +35,7 @@ defmodule SamSite do
 
   def round_trip(
         control,
+        pubsub,
         name \\ "S75Dvina",
         pos_lat \\ 54.733370063961715,
         pos_lng \\ 20.489215711966924
@@ -40,7 +44,8 @@ defmodule SamSite do
       name: name,
       type: :military,
       pos_lat: pos_lat,
-      pos_lng: pos_lng
+      pos_lng: pos_lng,
+      pubsub: pubsub
     }
 
     SamSite.Worker.start_link(%{
