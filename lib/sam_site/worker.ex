@@ -1,8 +1,11 @@
 defmodule SamSite.Worker do
   require Logger
+  alias SamSite.Missile
   alias SamSite.State
   alias SamSite.Calculator
   use GenServer
+
+  require Logger
 
   @tick 10_000
 
@@ -29,7 +32,6 @@ defmodule SamSite.Worker do
 
     {:ok, initial_state, {:continue, :setup}}
   end
-
 
   @impl true
   def handle_continue(:setup, %{sam_site: %SamSite.State{} = sam_site} = state) do
@@ -58,7 +60,7 @@ defmodule SamSite.Worker do
   end
 
   @impl true
-  def handle_info(:tick, %{sam_site: %SamSite.State{} = _sam_site} = state) do
+  def handle_info(:tick, %{sam_site: %SamSite.State{} = sam_site} = state) do
     ping =
       ping_traffic_control(state.flight_control, state.sam_site.pos_lat, state.sam_site.pos_lng)
 
@@ -66,29 +68,94 @@ defmodule SamSite.Worker do
       {:ok, topics} ->
         for topic <- topics do
           broadcast(state.flight_control, topic, state)
+
+          Enum.each(sam_site.missiles, fn {_aircraft_name, missile} ->
+            broadcast(state.flight_control, topic, missile)
+          end)
         end
 
       nil ->
         Logger.debug("No client stations in reach")
     end
 
+    missiles = handle_missiles(state.sam_site.missiles)
+
     timeout_ref = Process.send_after(self(), :tick, @tick)
 
-    {:noreply, state |> Map.put(:timeout_ref, timeout_ref)}
+    sam_site =
+      sam_site
+      |> Map.put(:missiles, missiles)
+
+    {:noreply,
+     state
+     |> Map.put(:timeout_ref, timeout_ref)
+     |> Map.put(:sam_site, sam_site)}
   end
 
   @impl true
-  def handle_info(%Aircraft.State{} = aircraft, state) do
-    Logger.debug("Опасность - Got contact! : #{inspect aircraft}")
+  def handle_info(%Aircraft.State{} = aircraft, %{sam_site: %SamSite.State{} = sam_site} = state) do
+    Logger.debug("Опасность - Got contact! : #{inspect(aircraft)}")
+
+    # Program missile.
+    missiles =
+      if not Map.has_key?(sam_site.missiles, aircraft.name) do
+        Map.put(
+          sam_site.missiles,
+          aircraft.name,
+          SamSite.Missile.lock_on_target(sam_site.pos_lat, sam_site.pos_lng, aircraft)
+        )
+      else
+        sam_site.missiles
+      end
+
+    sam_site =
+      sam_site
+      |> Map.put(:missiles, missiles)
+
+    state =
+      state
+      |> Map.put(:sam_site, sam_site)
 
     {:noreply, state}
   end
 
-  @impl true 
+  @impl true
   def handle_info(%SamSite.State{} = _samsite, state) do
     # Echo
-    
+
     {:noreply, state}
+  end
+
+  @impl true
+  def handle_info(%Missile.State{} = _missile, state) do
+    # Echo
+
+    {:noreply, state}
+  end
+
+  # Broad cast our missiles,
+  # If missile hit, crash aircraft.
+  # Filter our missiles from the list.
+  defp handle_missiles(missiles) do
+    # Keep list of missiles, We dont want to send more then once
+    step_missiles(missiles)
+  end
+
+  defp step_missiles(missiles) do
+    missiles =
+      Enum.map(missiles, fn {aircraft_name, missile} ->
+        %{aircraft: aircraft} =
+          GenServer.call(:global.whereis_name(String.to_atom(aircraft_name)), :get_state)
+
+        if missile.status == :onroute do
+          {aircraft_name, Missile.track_target(missile, aircraft, @tick)}
+        else
+          {aircraft_name, missile}
+        end
+      end)
+      |> Enum.into(%{})
+
+    missiles
   end
 
   # Controller is a module that we assume implements a list_topics fn.
@@ -105,6 +172,15 @@ defmodule SamSite.Worker do
   defp broadcast(controller, topic, %{sam_site: %SamSite.State{} = sam_site} = _state) do
     if function_exported?(controller, :broadcast, 2) do
       {:ok, controller.broadcast(topic, sam_site)}
+    else
+      Logger.debug("Broadcast not available")
+      nil
+    end
+  end
+
+  defp broadcast(controller, topic, %Missile.State{} = missile) do
+    if function_exported?(controller, :broadcast, 2) do
+      {:ok, controller.broadcast(topic, missile)}
     else
       Logger.debug("Broadcast not available")
       nil

@@ -29,6 +29,7 @@ defmodule SamSite do
       :pos_lng,
       :pubsub,
       launches: 0,
+      missiles: %{},
       status: :offline
     ]
   end
