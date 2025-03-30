@@ -137,15 +137,39 @@ defmodule SamSite.Worker do
   # If missile hit, crash aircraft.
   # Filter our missiles from the list.
   defp handle_missiles(missiles) do
-    # Keep list of missiles, We dont want to send more then once
-    step_missiles(missiles)
+    missiles
+    # Move missiles to new state.
+    |> step_missiles!()
+    # Shoot them down if hit.
+    |> explode_missiles!()
   end
 
-  defp step_missiles(missiles) do
+  defp step_missiles!(missiles) do
     missiles =
       Enum.map(missiles, fn {aircraft_name, missile} ->
-        %{aircraft: aircraft} =
-          GenServer.call(:global.whereis_name(String.to_atom(aircraft_name)), :get_state)
+        aircraft =
+          case missile.status do
+            :selfdestruct ->
+              missile.target
+
+            :exploded ->
+              missile.target
+
+            :hit ->
+              missile.target
+
+            :onroute ->
+              pid = :global.whereis_name(String.to_atom(aircraft_name))
+
+              if pid != :undefined do
+                %{aircraft: aircraft} =
+                  GenServer.call(pid, :get_state)
+
+                aircraft
+              else
+                missile.target
+              end
+          end
 
         if missile.status == :onroute do
           {aircraft_name, Missile.track_target(missile, aircraft, @tick)}
@@ -156,6 +180,28 @@ defmodule SamSite.Worker do
       |> Enum.into(%{})
 
     missiles
+  end
+
+  defp explode_missiles!(missiles) do
+    Enum.each(missiles, fn {aircraft_name, missile} ->
+      if missile.status == :hit do
+        pid = :global.whereis_name(String.to_atom(aircraft_name))
+
+        if pid != :undefined do
+          GenServer.call(pid, :crash)
+        end
+      end
+    end)
+
+    missiles
+    |> Enum.map(fn {aircraft_name, missile} = tuple ->
+      if missile.status == :hit do
+        {aircraft_name, %SamSite.Missile.State{missile | status: :exploded}}
+      else
+        tuple
+      end
+    end)
+    |> Enum.into(%{})
   end
 
   # Controller is a module that we assume implements a list_topics fn.

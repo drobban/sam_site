@@ -4,7 +4,7 @@ defmodule SamSite.Missile do
 
   defmodule State do
     @type name :: String.t()
-    @type status :: :onroute | :hit | :selfdestruct
+    @type status :: :onroute | :hit | :selfdestruct | :exploded
     @type type :: :military
     @type position :: float()
     @type speed_kmh :: integer()
