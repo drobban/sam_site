@@ -34,7 +34,8 @@ defmodule SamSite do
     ]
   end
 
-  def round_trip(
+  def supervised_round_trip(
+        supervisor,
         control,
         pubsub,
         name \\ "S75Dvina",
@@ -49,10 +50,19 @@ defmodule SamSite do
       pubsub: pubsub
     }
 
-    SamSite.Worker.start_link(%{
-      initial_state: state,
-      flight_control: control
-    })
+    DynamicSupervisor.start_child(
+      supervisor,
+      {SamSite.Worker,
+       %{
+         initial_state: state,
+         flight_control: control
+       }}
+    )
+
+    # SamSite.Worker.start_link(%{
+    #   initial_state: state,
+    #   flight_control: control
+    # })
   end
 
   def get_state(name) do
