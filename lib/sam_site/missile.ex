@@ -37,7 +37,7 @@ defmodule SamSite.Missile do
       bearing: 0.0,
       distance_travelled: 0,
       range: 40_000,
-      speed: 35_000,
+      speed: 25_000,
       status: :onroute
     ]
   end
